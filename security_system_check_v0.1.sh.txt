@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# =========================
+# System Check Script
+#  v0.1
+# =========================
+
+# 로그 디렉터리
+LOG_DIR="/var/log/system_check"
+mkdir -p $LOG_DIR
+
+# 날짜
+DATE=$(date +"%Y-%m-%d %H:%M:%S")
+LOG_FILE="$LOG_DIR/system_check_$(date +%Y%m%d).log"
+
+DISK_THRESHOLD=50
+CHECK_PROCESS="nginx"
+
+HOSTNAME=$(hostname)
+
+echo "==============================" >> $LOG_FILE
+echo "System Check Time : $DATE" >> $LOG_FILE
+echo "==============================" >> $LOG_FILE
+
+################################
+# 1. 디스크 사용량
+################################
+echo "[Disk Usage]" >> $LOG_FILE
+df -h >> $LOG_FILE
+echo "" >> $LOG_FILE
+
+echo "[Disk Usage Threshold Check (> ${DISK_THRESHOLD}%)]" >> $LOG_FILE
+
+df -hP | awk 'NR>1 {print $5 " " $6}' | while read usage mount
+do
+    usage_percent=${usage%\%}
+
+    if [ "$usage_percent" -gt "$DISK_THRESHOLD" ]; then
+        echo "WARNING: $mount usage is ${usage_percent}% (OVER ${DISK_THRESHOLD}%)" >> $LOG_FILE
+    else
+        echo "OK: $mount usage is ${usage_percent}%" >> $LOG_FILE
+    fi
+done
+
+echo "" >> $LOG_FILE
+
+################################
+# 2. 메모리 사용량
+################################
+echo "[Memory Usage]" >> $LOG_FILE
+free -h >> $LOG_FILE
+echo "" >> $LOG_FILE
+
+################################
+# 3. CPU Load
+################################
+echo "[CPU Load Average]" >> $LOG_FILE
+uptime >> $LOG_FILE
+echo "" >> $LOG_FILE
+
+################################
+# 4. 상위 메모리 사용 프로세스 TOP 5
+################################
+echo "[Top 5 Memory Processes]" >> $LOG_FILE
+ps -eo pid,comm,%mem,%cpu --sort=-%mem | head -n 6 >> $LOG_FILE
+echo "" >> $LOG_FILE
+
+################################
+# 5. nginx 프로세스 체크 + Slack 알림
+################################
+echo "[Process Check: nginx]" >> $LOG_FILE
+
+if pgrep -x "$CHECK_PROCESS" > /dev/null; then
+    echo "OK: process '$CHECK_PROCESS' is running" >> $LOG_FILE
+else
+    echo "ERROR: process '$CHECK_PROCESS' is NOT running" >> $LOG_FILE
+fi
+
+echo "" >> $LOG_FILE
+echo "System check completed." >> $LOG_FILE
+echo "==============================" >> $LOG_FILE
