@@ -1,0 +1,309 @@
+* Ansible Playbook
+ - 무엇을 할 것인지
+ - 대상 서버에 어떤 작업을, 어떤 순서로, 어떤 조건에서 실행할지..
+ - yaml 문법으로 선언된 자동화 시나리오.
+
+
+ ansible(control Node) ----------> web#1        web#2      dbserver      
+                      ssh-copy-id   ssh키 복사
+                      sudoers   NOPASSWD
+                     ssh audt_2026@192.168.xx.xx
+                     sudo vi /etc/sudoers.d/audit_2026
+                     --------------------------------------------
+                     audit_2026 ALL=(ALL) NOPASSWD: ALL
+                     --------------------------------------------
+
+
+--- :  최상위 문법  플레이북의 플레이 블록 시작
+-   : 설명(사람이 해독하기 위한), 로그, 에러 분석시 설명이 참조
+hosts: 인벤토리에 정의된 대상 그룹 또는 호스트
+          
+
+gather_facts:·true   대상서버의 정보 수집
+            OS 종류, IP 주소, CPU, 메모리 정보'
+변수: ansible_facts.os.family
+        ansible_facts.hostname
+
+
+tasks:
+  - name :
+    ansible.builtin.dnf:
+        name: nginx
+       state: present
+
+
+1)  패키지 설치
+    - name : Install nginx
+      ansible.builtin.dnf:
+       name: nginx
+       state: present    설치됨.
+
+
+2) 서비스 제어
+    - name : Start  nginx
+      ansible.builtin.service:
+        name: nginx
+       state: started
+       enabled: true
+
+3) 파일 복사
+   - name : Copy config
+      ansible.builtin.copy:
+        src: nginx.conf
+        dest: /etc/nginx/nginx.conf
+       owner: root
+       mode: '0644'
+
+        
+4) 로그 디렉토리 생성
+  - name : Create log directory
+      ansible.builtin.file:
+        path: /var/log/system_check
+        state: directory
+       owner: root
+       group: root
+       mode: '0755'
+
+
+5) crontab 생성
+  - name :  Register system check cron job
+      ansible.builtin.cron:
+        name: "Security Check Script"
+        user: root
+        minut: "*/10"
+        job: "/usr/local/bin/security_check.sh"
+
+
+
+6) Control Node로 수집
+    ansible.builtin.fetch
+    src:
+    dest:
+
+* 변수 
+ 1)  playbook 변수
+   vars:  
+      app_port: 8080
+
+   port {{ app_port }}
+
+조건문(when)
+ - name: firewall 설정
+     ansible.builtin.service:
+        name: firewalld
+        state: started
+     when:  ansible_facts.os_family =="Rocky"
+- rocky Linux,  Ubuntu Linux
+  yum, dnf        apt, apt-get
+
+
+반복문 (loop)
+- name: Install package
+     ansible.builtin.dnf:
+        name: "{{ item }}"
+        state: present
+    loop:
+       - nginx
+       - git
+       - vim
+
+핸들러(handlers)
+- 변경이 발생했을 때만 실행
+tasks:
+- name: Copy config
+     copy: 
+        src: nginx.conf
+        dest: /etc/nginx/nginx.conf
+    notify: restart nginx
+
+handlers:
+    -name: restart nginx
+     service:
+       name: nginx
+      state: restarted
+
+- notify된 핸들러 는 변경이 발생했을 때만 호출
+   중복 실행 방지
+
+
+---------------------------------------------------------
+#########################################
+실습
+#########################################
+
+
+
+
+
+
+
+
+1. INI 인벤토리 - YAML 변경
+[websevers]
+web1 ansible_host=192.168.64.171
+web2 ansible_host=192.168.64.172
+
+[dbservers]
+dbserver ansible_host=192.168.64.173
+
+[all:vars]
+ansible_user=audit_2026
+ansible_become=true
+
+
+2. Playbook 작업
+
+
+----------------------
+프로젝트 폴더: mkdir my_ansible_playbook
+   cd my_ansible_playbook
+ -인벤토리 기본 위치: /etc/ansible/hosts
+                           ./inventories/prod/hosts.yml
+             mkdir -p inventories/prod
+   playbook   :  ./playbooks/site.yml
+            mkdir playbooks
+
+ sudo dnf install -y tree
+
+
+vi  ./inventories/prod/hosts.yml
+[websevers]
+web1 ansible_host=192.168.64.171
+web2 ansible_host=192.168.64.172
+
+[dbservers]
+dbserver ansible_host=192.168.64.173
+
+[all:vars]
+ansible_user=audit_2026
+ansible_become=true
+
+vi ./playbooks/site.yml
+---
+#1. hello 테스트
+- name: Hello Test
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - debug:
+        msg: "hello ansible world"
+
+ansible-playbook   -i ./inventories/prod/hosts.yml playbooks/site.yml
+
+문법 체크
+ansible-playbook  --syntax-check  playbooks/site.yml
+
+vi ./playbooks/site.yml
+---
+#1. hello 테스트
+- name: Hello Test
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - debug:
+        msg: "hello ansible world"
+
+
+#2. nginx on webservers
+- name: Install nginx
+  hosts: webervers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Gather service facts
+     service_facts:
+
+    - name: Install nginx
+      dnf:
+        name: nginx
+        state: present
+    
+    - name: Start nginx enable nginx
+      service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Open HTTP 80 on firewalld
+      ansible.posix.firewalld:
+        service: http
+        permanent: true
+        state: enabled
+        immediate: true
+      when: ansible_facts.services['firewalld.service'] is defined
+
+#3. postgresql on dbservers
+- name: Install postgresql
+  hosts: dbservers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install postgresql server
+      dnf:
+        name: postgresql-server
+        state: present
+
+  - name: postgresql database init
+    command: psotgresql-setup --initdb
+    args:
+       creates: /var/lib/pgsql/data/PG_VERSION
+
+  - name: Start and enable Postgresql
+    service:
+      name: postgresql 
+      state: started
+      enable: true
+
+   - name: Allow PostgreSQL port(5432) in firewalld
+     ansible.posix.firewalld:
+        service: h5432/tcp
+        permanent: true
+        state: enabled
+        immediate: true
+      when: ansible_facts.services['firewalld.service'] is defined
+
+
+
+
+    
+패키지 설치 확인
+web#1~2  :  dnf list installed | grep nginx
+
+
+db           : dnf list installed  | grep postgresql
+                which psql
+
+ dbserver: 터미널
+                sudo -u postgres psql
+ 
+              postgres-#
+             postgres-# \l  ( list) - 전체 데이터베이스 목록
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
